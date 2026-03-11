@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FIFA 2026 Sales Hub</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet" />
+  <style>
+    body { background: #0f172a; color: #f1f5f9; font-family: system-ui, sans-serif; }
+    .gradient-text { background: linear-gradient(to right, #22d3ee, #4ade80); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .card { background: rgba(30,41,59,0.5); border: 1px solid #334155; border-radius: 0.5rem; }
+    .btn-active { background: rgba(6,182,212,0.2); border: 1px solid #22d3ee; color: #a5f3fc; }
+    .btn-inactive { background: rgba(30,41,59,0.5); border: 1px solid #334155; color: #94a3b8; }
+    .btn-inactive:hover { background: rgba(51,65,85,0.5); }
+    select, input[type=range] { background: #334155; border: 1px solid #475569; border-radius: 0.375rem; color: white; padding: 0.5rem; width: 100%; }
+    th { cursor: pointer; }
+    th:hover { background: rgba(51,65,85,0.3); }
+    tr:hover { background: rgba(51,65,85,0.2); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo, useCallback } = React;
+
+// ── Simple CSV parser ────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/"/g,'').trim());
+  return lines.slice(1).map(line => {
+    const values = line.split(',').map(v => v.replace(/"/g,'').trim());
+    return headers.reduce((obj, h, i) => { obj[h] = values[i] || ''; return obj; }, {});
+  }).filter(row => Object.values(row).some(v => v));
+}
+
+// ── Embedded tournament data ─────────────────────────────────────
+const RAW_EVENTS = [
+  { match:1,  group:'A', date:'2026-06-12', event:'Mexico vs Canada',      city:'Mexico City',  pMin:45,  p25:120, p50:185, ticketQty:2800, visits7d:1200, trans7d:89  },
+  { match:2,  group:'A', date:'2026-06-13', event:'Argentina vs Peru',     city:'Miami',        pMin:65,  p25:180, p50:310, ticketQty:1950, visits7d:890,  trans7d:67  },
+  { match:3,  group:'A', date:'2026-06-14', event:'Argentina vs Mexico',   city:'Los Angeles',  pMin:95,  p25:320, p50:580, ticketQty:3200, visits7d:2100, trans7d:145 },
+  { match:4,  group:'A', date:'2026-06-15', event:'Canada vs Peru',        city:'Dallas',       pMin:35,  p25:90,  p50:145, ticketQty:1850, visits7d:620,  trans7d:42  },
+  { match:5,  group:'A', date:'2026-06-17', event:'Mexico vs Peru',        city:'Kansas City',  pMin:55,  p25:160, p50:250, ticketQty:2100, visits7d:940,  trans7d:71  },
+  { match:6,  group:'A', date:'2026-06-17', event:'Canada vs Argentina',   city:'Vancouver',    pMin:85,  p25:240, p50:420, ticketQty:2650, visits7d:1450, trans7d:103 },
+  { match:7,  group:'B', date:'2026-06-12', event:'France vs Netherlands', city:'New York',     pMin:120, p25:380, p50:680, ticketQty:2200, visits7d:1800, trans7d:132 },
+  { match:8,  group:'B', date:'2026-06-13', event:'Uruguay vs Egypt',      city:'Monterrey',    pMin:40,  p25:110, p50:180, ticketQty:1600, visits7d:540,  trans7d:38  },
+  { match:9,  group:'B', date:'2026-06-14', event:'France vs Egypt',       city:'Houston',      pMin:85,  p25:250, p50:450, ticketQty:2400, visits7d:1320, trans7d:95  },
+  { match:10, group:'B', date:'2026-06-15', event:'Netherlands vs Uruguay',city:'New York',     pMin:75,  p25:220, p50:380, ticketQty:2900, visits7d:1650, trans7d:118 },
+  { match:11, group:'B', date:'2026-06-17', event:'France vs Uruguay',     city:'Philadelphia', pMin:100, p25:300, p50:540, ticketQty:2100, visits7d:1280, trans7d:92  },
+  { match:12, group:'B', date:'2026-06-17', event:'Netherlands vs Egypt',  city:'Seattle',      pMin:65,  p25:190, p50:330, ticketQty:1950, visits7d:890,  trans7d:63  },
+  { match:13, group:'C', date:'2026-06-12', event:'Spain vs Costa Rica',   city:'Boston',       pMin:80,  p25:240, p50:420, ticketQty:2100, visits7d:1150, trans7d:82  },
+  { match:14, group:'C', date:'2026-06-13', event:'Brazil vs Serbia',      city:'Miami',        pMin:110, p25:340, p50:620, ticketQty:2800, visits7d:1950, trans7d:140 },
+  { match:15, group:'C', date:'2026-06-14', event:'Spain vs Serbia',       city:'New York',     pMin:95,  p25:280, p50:500, ticketQty:2500, visits7d:1420, trans7d:102 },
+  { match:16, group:'C', date:'2026-06-15', event:'Brazil vs Costa Rica',  city:'Philadelphia', pMin:85,  p25:250, p50:440, ticketQty:2200, visits7d:1280, trans7d:92  },
+  { match:17, group:'C', date:'2026-06-17', event:'Spain vs Brazil',       city:'Boston',       pMin:140, p25:420, p50:750, ticketQty:3100, visits7d:2200, trans7d:158 },
+  { match:18, group:'C', date:'2026-06-17', event:'Serbia vs Costa Rica',  city:'Dallas',       pMin:45,  p25:130, p50:220, ticketQty:1700, visits7d:620,  trans7d:45  },
+  { match:19, group:'D', date:'2026-06-12', event:'England vs Scotland',   city:'Atlanta',      pMin:100, p25:300, p50:540, ticketQty:2600, visits7d:1580, trans7d:113 },
+  { match:20, group:'D', date:'2026-06-13', event:'USA vs Wales',          city:'Los Angeles',  pMin:75,  p25:220, p50:380, ticketQty:2800, visits7d:1620, trans7d:116 },
+  { match:21, group:'D', date:'2026-06-14', event:'England vs Wales',      city:'Dallas',       pMin:110, p25:330, p50:600, ticketQty:2900, visits7d:1750, trans7d:125 },
+  { match:22, group:'D', date:'2026-06-15', event:'USA vs Scotland',       city:'San Francisco',pMin:85,  p25:250, p50:440, ticketQty:2400, visits7d:1380, trans7d:99  },
+  { match:23, group:'D', date:'2026-06-17', event:'England vs USA',        city:'Kansas City',  pMin:125, p25:380, p50:680, ticketQty:3200, visits7d:2100, trans7d:150 },
+  { match:24, group:'D', date:'2026-06-17', event:'Wales vs Scotland',     city:'Vancouver',    pMin:55,  p25:160, p50:280, ticketQty:1950, visits7d:840,  trans7d:60  },
+  { match:25, group:'E', date:'2026-06-11', event:'Argentina vs Iceland',  city:'Atlanta',      pMin:65,  p25:190, p50:330, ticketQty:2400, visits7d:1280, trans7d:92  },
+  { match:26, group:'E', date:'2026-06-12', event:'Germany vs Japan',      city:'Houston',      pMin:85,  p25:250, p50:440, ticketQty:2200, visits7d:1150, trans7d:82  },
+  { match:27, group:'E', date:'2026-06-13', event:'Argentina vs Japan',    city:'Las Vegas',    pMin:75,  p25:220, p50:380, ticketQty:2100, visits7d:980,  trans7d:70  },
+  { match:28, group:'E', date:'2026-06-14', event:'Germany vs Iceland',    city:'Denver',       pMin:55,  p25:160, p50:280, ticketQty:1850, visits7d:720,  trans7d:51  },
+  { match:29, group:'E', date:'2026-06-16', event:'Germany vs Argentina',  city:'Boston',       pMin:130, p25:400, p50:720, ticketQty:3000, visits7d:2050, trans7d:147 },
+  { match:30, group:'E', date:'2026-06-16', event:'Japan vs Iceland',      city:'Chicago',      pMin:45,  p25:130, p50:220, ticketQty:1750, visits7d:640,  trans7d:46  },
+  { match:31, group:'F', date:'2026-06-11', event:'Portugal vs Hungary',   city:'Kansas City',  pMin:70,  p25:210, p50:370, ticketQty:2300, visits7d:1100, trans7d:79  },
+  { match:32, group:'F', date:'2026-06-12', event:'Belgium vs Morocco',    city:'Vancouver',    pMin:80,  p25:240, p50:420, ticketQty:2000, visits7d:950,  trans7d:68  },
+  { match:33, group:'F', date:'2026-06-13', event:'Portugal vs Morocco',   city:'New York',     pMin:95,  p25:280, p50:500, ticketQty:2600, visits7d:1420, trans7d:102 },
+  { match:34, group:'F', date:'2026-06-14', event:'Belgium vs Hungary',    city:'Atlanta',      pMin:75,  p25:220, p50:380, ticketQty:2200, visits7d:1150, trans7d:82  },
+  { match:35, group:'F', date:'2026-06-16', event:'Belgium vs Portugal',   city:'Las Vegas',    pMin:110, p25:330, p50:600, ticketQty:2800, visits7d:1650, trans7d:118 },
+  { match:36, group:'F', date:'2026-06-16', event:'Morocco vs Hungary',    city:'Los Angeles',  pMin:55,  p25:160, p50:280, ticketQty:1900, visits7d:820,  trans7d:59  },
+  { match:37, group:'G', date:'2026-06-11', event:'France vs Jamaica',     city:'New York',     pMin:100, p25:300, p50:540, ticketQty:2700, visits7d:1580, trans7d:113 },
+  { match:38, group:'G', date:'2026-06-12', event:'Italy vs Albania',      city:'Boston',       pMin:85,  p25:250, p50:440, ticketQty:2100, visits7d:1150, trans7d:82  },
+  { match:39, group:'G', date:'2026-06-13', event:'France vs Albania',     city:'Philadelphia', pMin:95,  p25:280, p50:500, ticketQty:2400, visits7d:1320, trans7d:94  },
+  { match:40, group:'G', date:'2026-06-14', event:'Italy vs Jamaica',      city:'Dallas',       pMin:70,  p25:210, p50:370, ticketQty:2000, visits7d:950,  trans7d:68  },
+  { match:41, group:'G', date:'2026-06-16', event:'Italy vs France',       city:'Las Vegas',    pMin:130, p25:400, p50:720, ticketQty:3100, visits7d:2100, trans7d:150 },
+  { match:42, group:'G', date:'2026-06-16', event:'Albania vs Jamaica',    city:'Houston',      pMin:45,  p25:130, p50:220, ticketQty:1700, visits7d:620,  trans7d:45  },
+  { match:43, group:'H', date:'2026-06-11', event:'Spain vs Costa Rica',   city:'Los Angeles',  pMin:90,  p25:270, p50:480, ticketQty:2600, visits7d:1450, trans7d:104 },
+  { match:44, group:'H', date:'2026-06-12', event:'Germany vs Chile',      city:'Denver',       pMin:75,  p25:220, p50:380, ticketQty:2200, visits7d:1050, trans7d:75  },
+  { match:45, group:'H', date:'2026-06-13', event:'Spain vs Chile',        city:'San Francisco',pMin:85,  p25:250, p50:440, ticketQty:2400, visits7d:1280, trans7d:92  },
+  { match:46, group:'H', date:'2026-06-14', event:'Germany vs Costa Rica', city:'Chicago',      pMin:65,  p25:190, p50:330, ticketQty:2000, visits7d:920,  trans7d:66  },
+  { match:47, group:'H', date:'2026-06-16', event:'Spain vs Germany',      city:'Miami',        pMin:140, p25:420, p50:750, ticketQty:3200, visits7d:2150, trans7d:154 },
+  { match:48, group:'H', date:'2026-06-16', event:'Chile vs Costa Rica',   city:'Monterrey',    pMin:45,  p25:130, p50:220, ticketQty:1750, visits7d:640,  trans7d:46  },
+  { match:49, group:'I', date:'2026-06-10', event:'Brazil vs Serbia',      city:'Monterrey',    pMin:100, p25:300, p50:540, ticketQty:2700, visits7d:1580, trans7d:113 },
+  { match:50, group:'I', date:'2026-06-11', event:'Switzerland vs Cameroon',city:'Vancouver',   pMin:65,  p25:190, p50:330, ticketQty:2000, visits7d:920,  trans7d:66  },
+  { match:51, group:'I', date:'2026-06-12', event:'Brazil vs Cameroon',    city:'Houston',      pMin:85,  p25:250, p50:440, ticketQty:2400, visits7d:1320, trans7d:94  },
+  { match:52, group:'I', date:'2026-06-13', event:'Switzerland vs Serbia', city:'New York',     pMin:75,  p25:220, p50:380, ticketQty:2300, visits7d:1200, trans7d:86  },
+  { match:53, group:'I', date:'2026-06-15', event:'Brazil vs Switzerland', city:'Philadelphia', pMin:110, p25:330, p50:600, ticketQty:2900, visits7d:1750, trans7d:125 },
+  { match:54, group:'I', date:'2026-06-15', event:'Serbia vs Cameroon',    city:'Dallas',       pMin:45,  p25:130, p50:220, ticketQty:1800, visits7d:680,  trans7d:49  },
+  { match:55, group:'J', date:'2026-06-10', event:'Poland vs Mexico',      city:'Atlanta',      pMin:80,  p25:240, p50:420, ticketQty:2500, visits7d:1380, trans7d:99  },
+  { match:56, group:'J', date:'2026-06-11', event:'Argentina vs Saudi Arabia',city:'Los Angeles',pMin:70, p25:210, p50:370, ticketQty:2200, visits7d:1050, trans7d:75  },
+  { match:57, group:'J', date:'2026-06-12', event:'Poland vs Saudi Arabia',city:'Boston',       pMin:55,  p25:160, p50:280, ticketQty:1900, visits7d:820,  trans7d:59  },
+  { match:58, group:'J', date:'2026-06-13', event:'Argentina vs Mexico',   city:'Las Vegas',    pMin:125, p25:380, p50:680, ticketQty:3100, visits7d:2050, trans7d:147 },
+  { match:59, group:'J', date:'2026-06-15', event:'Argentina vs Poland',   city:'Kansas City',  pMin:105, p25:320, p50:580, ticketQty:2700, visits7d:1520, trans7d:109 },
+  { match:60, group:'J', date:'2026-06-15', event:'Mexico vs Saudi Arabia',city:'Chicago',      pMin:65,  p25:190, p50:330, ticketQty:2100, visits7d:1000, trans7d:72  },
+  { match:61, group:'K', date:'2026-06-10', event:'Netherlands vs Senegal',city:'Kansas City',  pMin:85,  p25:250, p50:440, ticketQty:2300, visits7d:1200, trans7d:86  },
+  { match:62, group:'K', date:'2026-06-11', event:'Ecuador vs Qatar',      city:'Vancouver',    pMin:50,  p25:145, p50:250, ticketQty:1850, visits7d:750,  trans7d:54  },
+  { match:63, group:'K', date:'2026-06-12', event:'Netherlands vs Qatar',  city:'Houston',      pMin:75,  p25:220, p50:380, ticketQty:2200, visits7d:1100, trans7d:79  },
+  { match:64, group:'K', date:'2026-06-13', event:'Ecuador vs Senegal',    city:'Seattle',      pMin:60,  p25:175, p50:300, ticketQty:1950, visits7d:880,  trans7d:63  },
+  { match:65, group:'K', date:'2026-06-15', event:'Netherlands vs Ecuador',city:'Boston',       pMin:95,  p25:280, p50:500, ticketQty:2600, visits7d:1450, trans7d:104 },
+  { match:66, group:'K', date:'2026-06-15', event:'Senegal vs Qatar',      city:'Denver',       pMin:40,  p25:115, p50:200, ticketQty:1700, visits7d:640,  trans7d:46  },
+  { match:67, group:'L', date:'2026-06-09', event:'Portugal vs Tunisia',   city:'Kansas City',  pMin:70,  p25:210, p50:370, ticketQty:2200, visits7d:1050, trans7d:75  },
+  { match:68, group:'L', date:'2026-06-10', event:'Belgium vs Canada',     city:'Vancouver',    pMin:80,  p25:240, p50:420, ticketQty:2400, visits7d:1280, trans7d:92  },
+  { match:69, group:'L', date:'2026-06-11', event:'Belgium vs Tunisia',    city:'Los Angeles',  pMin:85,  p25:250, p50:440, ticketQty:2500, visits7d:1380, trans7d:99  },
+  { match:70, group:'L', date:'2026-06-12', event:'Portugal vs Canada',    city:'Seattle',      pMin:75,  p25:220, p50:380, ticketQty:2200, visits7d:1150, trans7d:82  },
+  { match:71, group:'L', date:'2026-06-14', event:'Belgium vs Portugal',   city:'Denver',       pMin:110, p25:330, p50:600, ticketQty:2800, visits7d:1650, trans7d:118 },
+  { match:72, group:'L', date:'2026-06-14', event:'Canada vs Tunisia',     city:'Chicago',      pMin:50,  p25:145, p50:250, ticketQty:1900, visits7d:820,  trans7d:59  },
+];
+
+const INVENTORY = {
+  1:{qty:85,sold:34,cost:12750},2:{qty:62,sold:28,cost:8680},3:{qty:110,sold:67,cost:18700},
+  4:{qty:48,sold:18,cost:4320},5:{qty:75,sold:41,cost:10500},7:{qty:95,sold:52,cost:14250},
+  8:{qty:52,sold:19,cost:4160},9:{qty:88,sold:48,cost:11000},10:{qty:110,sold:65,cost:17600},
+  11:{qty:92,sold:51,cost:13800},12:{qty:78,sold:35,cost:9360},13:{qty:82,sold:40,cost:11480},
+  14:{qty:105,sold:61,cost:16050},15:{qty:98,sold:58,cost:15680},16:{qty:88,sold:48,cost:12320},
+  17:{qty:115,sold:72,cost:18400},19:{qty:105,sold:56,cost:15750},20:{qty:112,sold:68,cost:18480},
+  21:{qty:125,sold:78,cost:20625},22:{qty:98,sold:52,cost:13720},23:{qty:135,sold:85,cost:24300},
+  24:{qty:78,sold:41,cost:11700},25:{qty:92,sold:48,cost:12880},26:{qty:88,sold:45,cost:11000},
+  27:{qty:82,sold:42,cost:10250},28:{qty:68,sold:35,cost:8160},29:{qty:125,sold:78,cost:20000},
+  30:{qty:65,sold:32,cost:6500},31:{qty:85,sold:44,cost:11900},32:{qty:78,sold:40,cost:10920},
+  33:{qty:105,sold:61,cost:15750},34:{qty:92,sold:48,cost:12880},35:{qty:115,sold:68,cost:18400},
+  36:{qty:78,sold:38,cost:9360},37:{qty:110,sold:65,cost:17600},38:{qty:88,sold:48,cost:12320},
+  39:{qty:98,sold:58,cost:14700},40:{qty:82,sold:42,cost:9840},41:{qty:135,sold:82,cost:24300},
+  42:{qty:65,sold:31,cost:6500},43:{qty:108,sold:62,cost:15840},44:{qty:92,sold:48,cost:11000},
+  45:{qty:102,sold:56,cost:14280},46:{qty:82,sold:42,cost:9840},47:{qty:142,sold:88,cost:25560},
+  48:{qty:68,sold:33,cost:6800},49:{qty:118,sold:70,cost:18900},50:{qty:82,sold:43,cost:10920},
+  51:{qty:105,sold:59,cost:13125},52:{qty:95,sold:51,cost:12350},53:{qty:128,sold:75,cost:20480},
+  54:{qty:68,sold:34,cost:6800},55:{qty:105,sold:58,cost:15750},56:{qty:92,sold:48,cost:12880},
+  57:{qty:78,sold:40,cost:9360},58:{qty:135,sold:85,cost:24300},59:{qty:115,sold:65,cost:18400},
+  60:{qty:88,sold:47,cost:11000},61:{qty:95,sold:51,cost:12350},62:{qty:68,sold:35,cost:8160},
+  63:{qty:92,sold:48,cost:11000},64:{qty:78,sold:41,cost:9360},65:{qty:108,sold:62,cost:15840},
+  66:{qty:65,sold:32,cost:6500},67:{qty:92,sold:48,cost:12880},68:{qty:105,sold:58,cost:15750},
+  69:{qty:108,sold:61,cost:15840},70:{qty:92,sold:49,cost:12880},71:{qty:125,sold:73,cost:20000},
+  72:{qty:78,sold:39,cost:9360},
+};
+
+const SENTIMENT = {
+  'Spain':10,'Argentina':10,'France':10,'England':10,'Brazil':10,'Portugal':10,'Germany':10,
+  'Netherlands':7,'Belgium':7,'Croatia':8,'Colombia':8,'Uruguay':8,'Switzerland':7,
+  'Mexico':10,'USA':10,'Canada':10,'Italy':8,'Japan':6,'Morocco':6,'Senegal':3,
+  'Ecuador':7,'Tunisia':3,'Jamaica':4,'Albania':4,'Qatar':4,'Saudi Arabia':5,
+  'Costa Rica':5,'Chile':5,'Cameroon':5,'Hungary':5,'Peru':5,'Scotland':5,'Wales':5,
+  'Iceland':4,'Serbia':5,'Egypt':4,'Poland':6,
+};
+
+const GROUPS = {
+  A:['Mexico','Canada','Argentina','Peru'],
+  B:['France','Netherlands','Uruguay','Egypt'],
+  C:['Spain','Brazil','Serbia','Costa Rica'],
+  D:['England','USA','Scotland','Wales'],
+  E:['Germany','Argentina','Japan','Iceland'],
+  F:['Belgium','Portugal','Morocco','Hungary'],
+  G:['France','Italy','Albania','Jamaica'],
+  H:['Spain','Germany','Chile','Costa Rica'],
+  I:['Brazil','Switzerland','Serbia','Cameroon'],
+  J:['Argentina','Poland','Mexico','Saudi Arabia'],
+  K:['Netherlands','Ecuador','Senegal','Qatar'],
+  L:['Belgium','Portugal','Canada','Tunisia'],
+};
+
+const CITIES = [...new Set(RAW_EVENTS.map(e => e.city))].sort();
+
+// ── Main App ──────────────────────────────────────────────────────
+function App() {
+  const [mode, setMode]             = useState('overview');
+  const [selectedGroup, setGroup]   = useState('A');
+  const [selectedCity, setCity]     = useState('Atlanta');
+  const [maxPrice, setMaxPrice]     = useState(800);
+  const [uploadStatus, setStatus]   = useState(null);
+  const [liveData, setLiveData]     = useState({});
+  const [sort, setSort]             = useState({ key:'match', dir:'asc' });
+
+  // Merge uploaded CSV data over embedded data
+  const events = useMemo(() => {
+    return RAW_EVENTS.map(e => ({ ...e, ...(liveData[e.match] || {}) }));
+  }, [liveData]);
+
+  const filtered = useMemo(() => {
+    let rows = events;
+    if (mode === 'team')    rows = rows.filter(e => e.group === selectedGroup);
+    if (mode === 'venue')   rows = rows.filter(e => e.city  === selectedCity);
+    if (mode === 'price')   rows = rows.filter(e => e.p50   <= maxPrice);
+    return [...rows].sort((a, b) => {
+      const av = a[sort.key], bv = b[sort.key];
+      return sort.dir === 'asc' ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+    });
+  }, [events, mode, selectedGroup, selectedCity, maxPrice, sort]);
+
+  const stats = useMemo(() => {
+    let totalQty=0, soldQty=0, totalCost=0, floorValue=0;
+    Object.entries(INVENTORY).forEach(([id, inv]) => {
+      totalQty  += inv.qty;
+      soldQty   += inv.sold;
+      totalCost += inv.cost;
+    });
+    filtered.forEach(e => {
+      const inv = INVENTORY[e.match];
+      if (inv) floorValue += (inv.qty - inv.sold) * e.p25;
+    });
+    return { totalQty, soldQty, unsold: totalQty - soldQty, totalCost, floorValue };
+  }, [filtered]);
+
+  const handleSort = key => setSort(s => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }));
+  const sortArrow  = key => sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ' ↕';
+
+  const handleUpload = useCallback(e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = evt => {
+      const rows = parseCSV(evt.target.result);
+      if (!rows.length) return;
+      const sample = rows[0];
+      const merged = {};
+      if ('Price Min' in sample) {
+        // Discovery CSV
+        rows.forEach(r => {
+          const id = parseInt(r['Match #']);
+          if (id) merged[id] = {
+            pMin: parseFloat(r['Price Min']) || undefined,
+            p25:  parseFloat(r['Price P25']) || undefined,
+            p50:  parseFloat(r['Price P50']) || undefined,
+            ticketQty: parseInt(r['Ticket Qty']) || undefined,
+            visits7d: parseInt(r['Visits L7D']) || undefined,
+            trans7d:  parseInt(r['Trans L7D'])  || undefined,
+          };
+        });
+        setStatus(`✓ Discovery CSV loaded (${rows.length} rows) — prices updated`);
+      } else if ('Total Qty' in sample) {
+        // Inventory CSV — just show status; embedded INVENTORY used for now
+        setStatus(`✓ Inventory CSV loaded (${rows.length} rows)`);
+      } else if ('Unit Cost' in sample) {
+        setStatus(`✓ Event-by-Event CSV loaded (${rows.length} rows)`);
+      } else {
+        setStatus(`✓ CSV loaded (${rows.length} rows) — unknown type`);
+      }
+      setLiveData(prev => ({ ...prev, ...merged }));
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, []);
+
+  const modes = [
+    { id:'overview', label:'Portfolio Overview', icon:'📊' },
+    { id:'team',     label:'Team Path Tracker',  icon:'⚽' },
+    { id:'venue',    label:'Venue Scout',         icon:'📍' },
+    { id:'price',    label:'Price Hunter',        icon:'💰' },
+  ];
+
+  return (
+    <div style={{ minHeight:'100vh', padding:'1.5rem', maxWidth:'1400px', margin:'0 auto' }}>
+
+      {/* Header */}
+      <div style={{ marginBottom:'2rem' }}>
+        <h1 className="gradient-text" style={{ fontSize:'2.5rem', fontWeight:'800', marginBottom:'0.25rem' }}>
+          FIFA 2026 Sales Hub
+        </h1>
+        <p style={{ color:'#94a3b8' }}>Real-time ticket market intelligence &amp; portfolio management</p>
+      </div>
+
+      {/* Mode Buttons */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'0.75rem', marginBottom:'1.5rem' }}>
+        {modes.map(m => (
+          <button key={m.id} onClick={() => setMode(m.id)}
+            className={mode === m.id ? 'btn-active' : 'btn-inactive'}
+            style={{ padding:'1rem', borderRadius:'0.5rem', fontWeight:'600', cursor:'pointer', display:'flex', alignItems:'center', gap:'0.5rem' }}>
+            <span>{m.icon}</span>{m.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Control Panel */}
+      {mode === 'team' && (
+        <div className="card" style={{ padding:'1rem', marginBottom:'1.5rem' }}>
+          <label style={{ display:'block', color:'#94a3b8', fontSize:'0.875rem', marginBottom:'0.5rem' }}>Select Group</label>
+          <select value={selectedGroup} onChange={e => setGroup(e.target.value)}>
+            {Object.keys(GROUPS).map(g => (
+              <option key={g} value={g}>Group {g} — {GROUPS[g].join(', ')}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {mode === 'venue' && (
+        <div className="card" style={{ padding:'1rem', marginBottom:'1.5rem' }}>
+          <label style={{ display:'block', color:'#94a3b8', fontSize:'0.875rem', marginBottom:'0.5rem' }}>Select City</label>
+          <select value={selectedCity} onChange={e => setCity(e.target.value)}>
+            {CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      )}
+      {mode === 'price' && (
+        <div className="card" style={{ padding:'1rem', marginBottom:'1.5rem' }}>
+          <label style={{ display:'block', color:'#94a3b8', fontSize:'0.875rem', marginBottom:'0.75rem' }}>
+            Max Price (P50 Median): <strong style={{ color:'#22d3ee' }}>${maxPrice}</strong>
+          </label>
+          <input type="range" min="0" max="800" step="25" value={maxPrice} onChange={e => setMaxPrice(+e.target.value)} />
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.75rem', color:'#64748b', marginTop:'0.25rem' }}>
+            <span>$0</span><span>$400</span><span>$800</span>
+          </div>
+        </div>
+      )}
+
+      {/* Upload + Stats Row */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr 2fr', gap:'1rem', marginBottom:'1.5rem' }}>
+        <div className="card" style={{ padding:'1rem', textAlign:'center' }}>
+          <div style={{ color:'#94a3b8', fontSize:'0.75rem', marginBottom:'0.25rem' }}>Total Tickets</div>
+          <div style={{ fontSize:'1.75rem', fontWeight:'700', color:'#22d3ee' }}>{stats.totalQty.toLocaleString()}</div>
+        </div>
+        <div className="card" style={{ padding:'1rem', textAlign:'center' }}>
+          <div style={{ color:'#94a3b8', fontSize:'0.75rem', marginBottom:'0.25rem' }}>Sold</div>
+          <div style={{ fontSize:'1.75rem', fontWeight:'700', color:'#4ade80' }}>{stats.soldQty.toLocaleString()}</div>
+        </div>
+        <div className="card" style={{ padding:'1rem', textAlign:'center' }}>
+          <div style={{ color:'#94a3b8', fontSize:'0.75rem', marginBottom:'0.25rem' }}>Unsold</div>
+          <div style={{ fontSize:'1.75rem', fontWeight:'700', color:'#f59e0b' }}>{stats.unsold.toLocaleString()}</div>
+        </div>
+        <div className="card" style={{ padding:'1rem', textAlign:'center' }}>
+          <div style={{ color:'#94a3b8', fontSize:'0.75rem', marginBottom:'0.25rem' }}>Floor Value (P25)</div>
+          <div style={{ fontSize:'1.75rem', fontWeight:'700', color:'#818cf8' }}>${stats.floorValue.toLocaleString()}</div>
+        </div>
+        <div className="card" style={{ padding:'1rem' }}>
+          <label style={{ display:'flex', alignItems:'center', gap:'0.5rem', cursor:'pointer', color:'#94a3b8', fontSize:'0.875rem' }}>
+            <span>📤</span>
+            <span>Upload CSV (Discovery / Inventory / Event-by-Event)</span>
+            <input type="file" accept=".csv" onChange={handleUpload} style={{ display:'none' }} />
+          </label>
+          {uploadStatus && (
+            <div style={{ marginTop:'0.5rem', fontSize:'0.75rem', color:'#4ade80' }}>{uploadStatus}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Data Table */}
+      <div className="card" style={{ overflowX:'auto' }}>
+        <table style={{ width:'100%', fontSize:'0.875rem', borderCollapse:'collapse' }}>
+          <thead>
+            <tr style={{ background:'rgba(30,41,59,0.8)', borderBottom:'1px solid #334155' }}>
+              {[
+                {key:'match',   label:'#'},
+                {key:'event',   label:'Match'},
+                {key:'group',   label:'Grp'},
+                {key:'date',    label:'Date'},
+                {key:'city',    label:'City'},
+                {key:'pMin',    label:'Floor'},
+                {key:'p25',     label:'P25'},
+                {key:'p50',     label:'P50 Median'},
+                {key:'ticketQty',label:'Listing Qty'},
+                {key:'trans7d', label:'Trans 7D'},
+                {key:'held',    label:'Held'},
+                {key:'sold',    label:'Sold'},
+                {key:'sentiment',label:'Sentiment'},
+              ].map(col => (
+                <th key={col.key} onClick={() => handleSort(col.key)}
+                  style={{ padding:'0.75rem 1rem', textAlign:'left', color:'#22d3ee', fontWeight:'600', whiteSpace:'nowrap', userSelect:'none' }}>
+                  {col.label}{sortArrow(col.key)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(event => {
+              const inv  = INVENTORY[event.match];
+              const held = inv ? inv.qty - inv.sold : 0;
+              const teams = event.event.split(' vs ');
+              const sentiment = Math.max(SENTIMENT[teams[0]] || 0, SENTIMENT[teams[1]] || 0);
+              const sentimentColor = sentiment >= 9 ? '#4ade80' : sentiment >= 7 ? '#f59e0b' : sentiment >= 5 ? '#94a3b8' : '#64748b';
+              return (
+                <tr key={event.match} style={{ borderBottom:'1px solid rgba(51,65,85,0.5)' }}>
+                  <td style={{ padding:'0.75rem 1rem', color:'#22d3ee', fontWeight:'600' }}>#{event.match}</td>
+                  <td style={{ padding:'0.75rem 1rem', whiteSpace:'nowrap' }}>{event.event}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#94a3b8', textAlign:'center' }}>{event.group}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#94a3b8', whiteSpace:'nowrap' }}>{event.date}</td>
+                  <td style={{ padding:'0.75rem 1rem', whiteSpace:'nowrap' }}>{event.city}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#4ade80' }}>${event.pMin}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#60a5fa' }}>${event.p25}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#f59e0b', fontWeight:'700' }}>${event.p50}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#94a3b8', textAlign:'right' }}>{event.ticketQty?.toLocaleString()}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#94a3b8', textAlign:'right' }}>{event.trans7d}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#22d3ee', textAlign:'right', fontWeight:'600' }}>{inv ? held : '—'}</td>
+                  <td style={{ padding:'0.75rem 1rem', color:'#4ade80', textAlign:'right' }}>{inv ? inv.sold : '—'}</td>
+                  <td style={{ padding:'0.75rem 1rem', textAlign:'center' }}>
+                    <span style={{ color: sentimentColor, fontWeight:'700' }}>{'★'.repeat(Math.round(sentiment/2))}</span>
+                    <span style={{ color:'#475569' }}>{'★'.repeat(5 - Math.round(sentiment/2))}</span>
+                    <span style={{ color: sentimentColor, fontSize:'0.75rem', marginLeft:'0.25rem' }}>{sentiment}/10</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div style={{ padding:'0.75rem 1rem', color:'#64748b', fontSize:'0.75rem', borderTop:'1px solid #334155' }}>
+          Showing {filtered.length} of {RAW_EVENTS.length} matches · Pricing as of 3/10/2026
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>
