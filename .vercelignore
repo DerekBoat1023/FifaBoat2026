@@ -1,0 +1,5 @@
+# Only deploy the HTML dashboard
+# Ignore all other files
+*
+!index.html
+!.gitignore
