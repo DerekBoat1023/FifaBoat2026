@@ -256,7 +256,7 @@ function makeHead(tableId, cols) {
     if (!c.key) return '<th class="' + align.trim() + '">' + c.label + '</th>';
     const active = st.key === c.key ? ' sort-active' : '';
     const arrow = st.key === c.key ? (st.asc ? ' ↑' : ' ↓') : ' <span style="opacity:.3">↕</span>';
-    return '<th class="sortable' + active + align + '" onclick="doSort('' + tableId + '','' + c.key + '')">' + c.label + arrow + '</th>';
+    return '<th class="sortable' + active + align + '" onclick="doSort(\'' + tableId + '\',\'' + c.key + '\')">' + c.label + arrow + '</th>';
   }).join('');
 }
 
