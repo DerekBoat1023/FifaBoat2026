@@ -4,15 +4,22 @@
   "description": "Real-time ticket market intelligence and portfolio management for FIFA 2026",
   "private": true,
   "dependencies": {
+    "@vercel/speed-insights": "^2.0.0",
+    "lucide-react": "^0.383.0",
+    "papaparse": "^5.4.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+<<<<<<< HEAD
     "react-scripts": "5.0.1",
     "lucide-react": "^0.383.0"
+=======
+    "react-scripts": "5.0.1"
+>>>>>>> 3a30099ea5c8812e1d29804b0181e9036fe4994e
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
+    "start": "react-app-rewired start",
+    "build": "react-app-rewired build",
+    "test": "react-app-rewired test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -31,5 +38,15 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+<<<<<<< HEAD
+=======
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.14",
+    "null-loader": "^4.0.1",
+    "postcss": "^8.4.27",
+    "react-app-rewired": "^2.2.1",
+    "tailwindcss": "^3.3.0"
+>>>>>>> 3a30099ea5c8812e1d29804b0181e9036fe4994e
   }
 }
