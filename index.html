@@ -363,23 +363,23 @@ function renderAllEvents() {
 let currentPathType = 'Group Stage';
 
 function initTeamSelect() {
-  const teams = [...new Set(EVENT_META.flatMap(e => [e.teamA, e.teamB]).filter(Boolean))].sort();
   const sel = document.getElementById('team-select');
+  const teams = Object.keys(TEAM_PATHS).sort();
   sel.innerHTML = teams.map(t => `<option value="${t}">${t}</option>`).join('');
   renderTeamPaths();
 }
 
 function renderTeamPaths() {
   const team = document.getElementById('team-select').value;
-  const teamEvents = EVENT_META.filter(e => e.teamA === team || e.teamB === team);
-  const group = teamEvents[0]?.group || '?';
-  document.getElementById('team-group').textContent = 'Group ' + group;
-  const pathKeys = ['Group Stage'];
+  const data = TEAM_PATHS[team];
+  if (!data) return;
+  document.getElementById('team-group').textContent = 'Group ' + (data.group || '?');
+  const pathKeys = Object.keys(data.paths || {});
   const btnsEl = document.getElementById('path-btns');
   btnsEl.innerHTML = pathKeys.map(k =>
     `<button class="path-btn${k===currentPathType?' active':''}" onclick="setPathType('${k}')">${k}</button>`
   ).join('');
-  if (!pathKeys.includes(currentPathType)) currentPathType = 'Group Stage';
+  if (!pathKeys.includes(currentPathType)) currentPathType = pathKeys[0] || 'Group Stage';
 
   const cols = [
     {label:'#', key:'match'},
@@ -391,13 +391,9 @@ function renderTeamPaths() {
     {label:'Links', key:null, center:true}
   ];
   if (!sortStates['paths-table']) sortStates['paths-table'] = {key:'match', asc:true};
-  const raw = teamEvents.map(e => {
-    const l = getLatest(e.match);
-    return {
-      match: e.match, group: e.group, desc: e.name, venue: e.venue, date: e.date,
-      price: l ? l.p50 : null, priceNum: l ? l.p50 : null, pos: e.pos, gotix: e.gotix
-    };
-  });
+  const raw = (data.paths[currentPathType] || []).map(r => ({
+    ...r, priceNum: parseFloat(r.price) || null, group: data.group
+  }));
   const sorted = sortRows(raw, 'paths-table');
   document.getElementById('paths-head').innerHTML = '<tr>' + makeHead('paths-table', cols) + '</tr>';
   document.getElementById('paths-body').innerHTML = sorted.map(r => `
@@ -440,6 +436,28 @@ const EVENT_META = EVENTS.map(e => ({
   phase: getPhase(e.name),
   ...getTeamNames(e.name)
 }));
+
+const TEAM_PATHS = {};
+EVENT_META.forEach(e => {
+  [e.teamA, e.teamB].forEach(team => {
+    if (!team) return;
+    if (!TEAM_PATHS[team]) {
+      TEAM_PATHS[team] = { group: e.group, paths: {} };
+    }
+    if (!TEAM_PATHS[team].paths['Group Stage']) {
+      TEAM_PATHS[team].paths['Group Stage'] = [];
+    }
+    TEAM_PATHS[team].paths['Group Stage'].push({
+      match: e.match,
+      desc: e.name,
+      venue: e.venue,
+      date: e.date,
+      price: getLatest(e.match)?.p50 || '—',
+      pos: e.pos,
+      gotix: e.gotix
+    });
+  });
+});
 
 function computeMovers() {
   return EVENT_META.map(e => {
