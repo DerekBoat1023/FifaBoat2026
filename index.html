@@ -359,23 +359,23 @@ function renderAllEvents() {
 let currentPathType = 'Group Stage';
 
 function initTeamSelect() {
+  const teams = [...new Set(EVENT_META.flatMap(e => [e.teamA, e.teamB]).filter(Boolean))].sort();
   const sel = document.getElementById('team-select');
-  const teams = Object.keys(TEAM_PATHS).sort();
   sel.innerHTML = teams.map(t => `<option value="${t}">${t}</option>`).join('');
   renderTeamPaths();
 }
 
 function renderTeamPaths() {
   const team = document.getElementById('team-select').value;
-  const data = TEAM_PATHS[team];
-  if (!data) return;
-  document.getElementById('team-group').textContent = 'Group ' + (data.group || '?');
-  const pathKeys = Object.keys(data.paths || {});
+  const teamEvents = EVENT_META.filter(e => e.teamA === team || e.teamB === team);
+  const group = teamEvents[0]?.group || '?';
+  document.getElementById('team-group').textContent = 'Group ' + group;
+  const pathKeys = ['Group Stage'];
   const btnsEl = document.getElementById('path-btns');
   btnsEl.innerHTML = pathKeys.map(k =>
     `<button class="path-btn${k===currentPathType?' active':''}" onclick="setPathType('${k}')">${k}</button>`
   ).join('');
-  if (!pathKeys.includes(currentPathType)) currentPathType = pathKeys[0] || 'Group Stage';
+  if (!pathKeys.includes(currentPathType)) currentPathType = 'Group Stage';
 
   const cols = [
     {label:'#', key:'match'},
@@ -386,9 +386,19 @@ function renderTeamPaths() {
     {label:'Links', key:null, center:true}
   ];
   if (!sortStates['paths-table']) sortStates['paths-table'] = {key:'match', asc:true};
+<<<<<<< HEAD
   const raw = (data.paths[currentPathType] || []).map(r => ({
     ...r, priceNum: parseFloat(r.price) || null
   }));
+=======
+  const raw = teamEvents.map(e => {
+    const l = getLatest(e.match);
+    return {
+      match: e.match, group: e.group, desc: e.name, venue: e.venue, date: e.date,
+      price: l ? l.p50 : null, priceNum: l ? l.p50 : null, pos: e.pos, gotix: e.gotix
+    };
+  });
+>>>>>>> parent of 0b98abc (Fix Team Paths page: add TEAM_PATHS constant populated from EVENT_META, revert renderTeamPaths to original logic, prices updated via getLatest)
   const sorted = sortRows(raw, 'paths-table');
   document.getElementById('paths-head').innerHTML = '<tr>' + makeHead('paths-table', cols) + '</tr>';
   document.getElementById('paths-body').innerHTML = sorted.map(r => `
@@ -408,7 +418,32 @@ function setPathType(type) {
 }
 
 // ── TAB 2: Market Trends ───────────────────────────────────────────────────────
+<<<<<<< HEAD
 const REF_DATE = '2026-02-19';
+=======
+const REF_DATE = '2026-03-10'; // baseline for "since 3/10" analysis
+
+function getPhase(eventName) {
+  const nm = eventName.toLowerCase();
+  if (nm.includes('round of 32')) return 'Round of 32';
+  if (nm.includes('round of 16')) return 'Round of 16';
+  if (nm.includes('quarterfinal')) return 'Quarterfinal';
+  if (nm.includes('semifinal')) return 'Semifinal';
+  if (nm.includes('final')) return 'Final';
+  return 'Group Stage';
+}
+
+function getTeamNames(name) {
+  const teams = name.split(' vs ').map(t => t.trim());
+  return {teamA: teams[0] || '', teamB: teams[1] || ''};
+}
+
+const EVENT_META = EVENTS.map(e => ({
+  ...e,
+  phase: getPhase(e.name),
+  ...getTeamNames(e.name)
+}));
+>>>>>>> parent of 0b98abc (Fix Team Paths page: add TEAM_PATHS constant populated from EVENT_META, revert renderTeamPaths to original logic, prices updated via getLatest)
 
 function computeMovers() {
   return EVENTS.map(e => {
