@@ -84,6 +84,21 @@ tr:hover td{background:#f8fafc}
 .pill-tag{display:inline-block;background:#f1f5f9;color:#475569;border-radius:4px;padding:2px 7px;font-size:.68rem;font-weight:700}
 input[type=range]{width:100%;cursor:pointer;accent-color:#1e40af}
 .range-val{font-size:.9rem;font-weight:800;color:#1e40af;min-width:80px}
+.panic-card{background:linear-gradient(135deg,#1a0000,#2d0a0a);border:1px solid #7f1d1d;border-radius:8px;overflow:hidden}
+.panic-card th{background:#450a0a;color:#fca5a5;border-bottom-color:#7f1d1d}
+.panic-card td{color:#fecaca;border-bottom-color:#450a0a33}
+.panic-card tr:hover td{background:#450a0a55}
+.panic-stat{background:linear-gradient(135deg,#2d0a0a,#450a0a);border:1px solid #991b1b;border-radius:8px;padding:14px}
+.panic-stat .stat-lbl{color:#f87171}
+.panic-stat .stat-val{color:#fef2f2}
+.panic-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.65rem;font-weight:800}
+.panic-critical{background:#dc2626;color:white;animation:pulse-red 1.5s infinite}
+.panic-warning{background:#d97706;color:white}
+.panic-watch{background:#6b7280;color:white}
+@keyframes pulse-red{0%,100%{opacity:1}50%{opacity:.7}}
+.score-bar{position:relative;background:#450a0a;border-radius:3px;height:18px;min-width:60px}
+.score-fill{position:absolute;top:0;left:0;height:100%;border-radius:3px}
+.score-text{position:relative;z-index:1;font-size:.7rem;font-weight:800;line-height:18px;text-align:center;color:white}
 </style>
 </head>
 <body>
@@ -101,6 +116,7 @@ input[type=range]{width:100%;cursor:pointer;accent-color:#1e40af}
   <button class="tab-btn" onclick="showTab(4)">&#128293; Hot Picks</button>
   <button class="tab-btn" onclick="showTab(5)">&#127967; Venue Scout</button>
   <button class="tab-btn" onclick="showTab(6)">&#127919; Price Hunter</button>
+  <button class="tab-btn" onclick="showTab(7)">&#128680; Panic Room</button>
 </div>
 <div id="content">
 
@@ -156,7 +172,7 @@ input[type=range]{width:100%;cursor:pointer;accent-color:#1e40af}
 
 <!-- TAB 4: Hot Picks -->
 <div class="tab-panel" id="tab-4">
-  <div class="insight"><strong>Score formula:</strong> Sentiment &times; (V7D / Avg V7D) &times; (Spread% + 0.5). Higher = stronger demand + margin potential. Click any column to sort.</div>
+  <div class="insight" id="picks-insight"></div>
   <div class="card overflow mt"><table id="picks-table"><thead id="picks-head"></thead><tbody id="picks-body"></tbody></table></div>
 </div>
 
@@ -179,6 +195,11 @@ input[type=range]{width:100%;cursor:pointer;accent-color:#1e40af}
     <span class="filter-count" id="hunter-count"></span>
   </div>
   <div class="card overflow"><table id="hunter-table"><thead id="hunter-head"></thead><tbody id="hunter-body"></tbody></table></div>
+</div>
+
+<div class="tab-panel" id="tab-7">
+  <div class="stat-grid" id="panic-stats"></div>
+  <div id="panic-content"></div>
 </div>
 
 </div><!-- end #content -->
@@ -245,6 +266,141 @@ function pctChange(matchNum, refDate) {
   return (latest.p50 - ref.p50) / ref.p50 * 100;
 }
 
+// ── Advanced metrics ──────────────────────────────────────────────────────────
+function getSnapSeries(matchNum) { return PRICES[String(matchNum)] || []; }
+
+function momentum3(matchNum) {
+  const snaps = getSnapSeries(matchNum);
+  if (snaps.length < 3) return null;
+  const [a, b, c] = snaps.slice(-3);
+  if (!a.p50 || !b.p50 || !c.p50) return null;
+  return ((c.p50 - b.p50) / b.p50 - (b.p50 - a.p50) / a.p50) * 100;
+}
+
+function listingVelocity(matchNum) {
+  const snaps = getSnapSeries(matchNum);
+  if (snaps.length < 2) return null;
+  const curr = snaps[snaps.length - 1], prev = snaps[snaps.length - 2];
+  if (curr.listQty == null || prev.listQty == null || !prev.listQty) return null;
+  return (curr.listQty - prev.listQty) / prev.listQty * 100;
+}
+
+function spreadTrend(matchNum) {
+  const snaps = getSnapSeries(matchNum);
+  if (snaps.length < 2) return null;
+  const prev = snaps[snaps.length - 2], curr = snaps[snaps.length - 1];
+  const sPrev = prev.pMin ? (prev.p50 - prev.pMin) / prev.pMin * 100 : 0;
+  const sCurr = curr.pMin ? (curr.p50 - curr.pMin) / curr.pMin * 100 : 0;
+  return sCurr - sPrev;
+}
+
+function demandScore(matchNum) {
+  const l = getLatest(matchNum);
+  if (!l) return null;
+  const vpl = l.listQty ? l.v7d / l.listQty : 0;
+  const txr = l.listQty ? (l.t7 || 0) / l.listQty : 0;
+  return vpl * 10 + txr * 100;
+}
+
+function absorptionRate(matchNum) {
+  const l = getLatest(matchNum);
+  if (!l || !l.t7 || l.t7 <= 0) return null;
+  return l.listQty / l.t7;
+}
+
+function sparklineSVG(values, w, h, color, opts) {
+  w = w || 80; h = h || 24; color = color || '#3b82f6'; opts = opts || {};
+  const vals = values.filter(v => v != null && !isNaN(v));
+  if (vals.length < 2) return '<span class="muted">—</span>';
+  const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 1;
+  const step = w / (vals.length - 1);
+  const pts = vals.map((v, i) => ((i * step).toFixed(1) + ',' + (h - 2 - ((v - mn) / rng) * (h - 4)).toFixed(1)));
+  const lx = ((vals.length - 1) * step).toFixed(1), ly = (h - 2 - ((vals[vals.length - 1] - mn) / rng) * (h - 4)).toFixed(1);
+  const area = opts.fill ? '<polygon points="0,' + h + ' ' + pts.join(' ') + ' ' + lx + ',' + h + '" fill="' + color + '" opacity="0.12"/>' : '';
+  return '<svg width="' + w + '" height="' + h + '" style="vertical-align:middle">' + area + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round"/><circle cx="' + lx + '" cy="' + ly + '" r="2" fill="' + color + '"/></svg>';
+}
+
+function p50Sparkline(matchNum) {
+  const snaps = getSnapSeries(matchNum);
+  const vals = snaps.map(s => s.p50).filter(v => v != null);
+  if (vals.length < 2) return '<span class="muted">—</span>';
+  const clr = vals[vals.length - 1] >= vals[0] ? '#16a34a' : '#dc2626';
+  return sparklineSVG(vals, 80, 24, clr, {fill: true});
+}
+
+function trendArrow(v) {
+  if (v == null) return '<span class="flat">—</span>';
+  if (v > 2) return '<span class="up" style="font-size:.7rem">&#9650;&#9650;</span>';
+  if (v > 0.5) return '<span class="up" style="font-size:.7rem">&#9650;</span>';
+  if (v < -2) return '<span class="down" style="font-size:.7rem">&#9660;&#9660;</span>';
+  if (v < -0.5) return '<span class="down" style="font-size:.7rem">&#9660;</span>';
+  return '<span class="flat" style="font-size:.7rem">&#9632;</span>';
+}
+
+function renderPriceChart(snaps, width, height) {
+  if (!snaps.length) return '';
+  const pad = {t:10, r:10, b:30, l:50};
+  const pW = width - pad.l - pad.r, pH = height - pad.t - pad.b;
+  const allV = snaps.flatMap(s => [s.p50, s.pMin]).filter(v => v > 0);
+  const mn = Math.min(...allV) * 0.9, mx = Math.max(...allV) * 1.05, rng = mx - mn || 1;
+  function x(i) { return pad.l + (i / Math.max(snaps.length - 1, 1)) * pW; }
+  function y(v) { return pad.t + pH - ((v - mn) / rng) * pH; }
+  const grid = [0.25, 0.5, 0.75].map(f => {
+    const v = mn + rng * f, yp = y(v);
+    return '<line x1="' + pad.l + '" y1="' + yp.toFixed(1) + '" x2="' + (width-pad.r) + '" y2="' + yp.toFixed(1) + '" stroke="#e2e8f0" stroke-width="1"/><text x="' + (pad.l-5) + '" y="' + (yp+3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#94a3b8">' + fmt$(v) + '</text>';
+  }).join('');
+  const p50pts = snaps.map((s,i) => x(i).toFixed(1)+','+y(s.p50||mn).toFixed(1)).join(' ');
+  const flrpts = snaps.map((s,i) => x(i).toFixed(1)+','+y(s.pMin||mn).toFixed(1)).join(' ');
+  const area = x(0).toFixed(1)+','+y(mn).toFixed(1)+' '+p50pts+' '+x(snaps.length-1).toFixed(1)+','+y(mn).toFixed(1);
+  const dates = snaps.map((s,i) => {
+    if (snaps.length > 8 && i % 2 !== 0 && i !== snaps.length-1) return '';
+    return '<text x="'+x(i).toFixed(1)+'" y="'+(height-5)+'" text-anchor="middle" font-size="8" fill="#94a3b8">'+s.date.replace(/202[56]-/,'')+'</text>';
+  }).join('');
+  const dots = snaps.map((s,i) => '<circle cx="'+x(i).toFixed(1)+'" cy="'+y(s.p50||mn).toFixed(1)+'" r="3" fill="#3b82f6"><title>'+s.date+': P50 '+fmt$(s.p50)+' / Floor '+fmt$(s.pMin)+'</title></circle>').join('');
+  return '<svg width="100%" viewBox="0 0 '+width+' '+height+'" style="display:block">'+grid+'<polygon points="'+area+'" fill="#3b82f6" opacity="0.1"/><polyline points="'+p50pts+'" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round"/><polyline points="'+flrpts+'" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>' + dots + dates + '<text x="'+(width-pad.r)+'" y="'+(pad.t-2)+'" text-anchor="end" font-size="9" fill="#3b82f6">P50</text><text x="'+(width-pad.r-35)+'" y="'+(pad.t-2)+'" text-anchor="end" font-size="9" fill="#94a3b8">Floor</text></svg>';
+}
+
+function renderDemandChart(snaps, width, height) {
+  if (!snaps.length) return '';
+  const pad = {t:10, r:10, b:30, l:50};
+  const pW = width - pad.l - pad.r, pH = height - pad.t - pad.b;
+  const v7ds = snaps.map(s => s.v7d || 0), t7s = snaps.map(s => s.t7 || 0);
+  const mxV = Math.max(...v7ds, 1), mxT = Math.max(...t7s, 1);
+  function x(i) { return pad.l + (i / Math.max(snaps.length - 1, 1)) * pW; }
+  const barW = Math.max(pW / snaps.length * 0.6, 4);
+  const bars = snaps.map((s, i) => {
+    const bh = (v7ds[i] / mxV) * pH;
+    return '<rect x="'+(x(i)-barW/2).toFixed(1)+'" y="'+(pad.t+pH-bh).toFixed(1)+'" width="'+barW.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="#8b5cf6" opacity="0.6" rx="2"><title>'+s.date+': V7D '+v7ds[i].toLocaleString()+'</title></rect>';
+  }).join('');
+  const t7pts = snaps.map((s,i) => x(i).toFixed(1)+','+(pad.t+pH-(t7s[i]/mxT)*pH).toFixed(1)).join(' ');
+  const dates = snaps.map((s,i) => {
+    if (snaps.length > 8 && i % 2 !== 0 && i !== snaps.length-1) return '';
+    return '<text x="'+x(i).toFixed(1)+'" y="'+(height-5)+'" text-anchor="middle" font-size="8" fill="#94a3b8">'+s.date.replace(/202[56]-/,'')+'</text>';
+  }).join('');
+  return '<svg width="100%" viewBox="0 0 '+width+' '+height+'" style="display:block">'+bars+'<polyline points="'+t7pts+'" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"/>'+dates+'<text x="'+(width-pad.r)+'" y="'+(pad.t-2)+'" text-anchor="end" font-size="9" fill="#8b5cf6">Views</text><text x="'+(width-pad.r-40)+'" y="'+(pad.t-2)+'" text-anchor="end" font-size="9" fill="#f59e0b">Txns</text></svg>';
+}
+
+function renderSupplyChart(snaps, width, height) {
+  if (!snaps.length) return '';
+  const pad = {t:10, r:10, b:30, l:50};
+  const pW = width - pad.l - pad.r, pH = height - pad.t - pad.b;
+  const lqs = snaps.map(s => s.listQty || 0);
+  const spreads = snaps.map(s => s.pMin ? (s.p50 - s.pMin)/s.pMin*100 : 0);
+  const mxL = Math.max(...lqs, 1), mxS = Math.max(...spreads, 1);
+  function x(i) { return pad.l + (i / Math.max(snaps.length - 1, 1)) * pW; }
+  const barW = Math.max(pW / snaps.length * 0.6, 4);
+  const bars = snaps.map((s, i) => {
+    const bh = (lqs[i] / mxL) * pH;
+    return '<rect x="'+(x(i)-barW/2).toFixed(1)+'" y="'+(pad.t+pH-bh).toFixed(1)+'" width="'+barW.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="#06b6d4" opacity="0.5" rx="2"><title>'+s.date+': Listings '+lqs[i].toLocaleString()+'</title></rect>';
+  }).join('');
+  const spts = snaps.map((s,i) => x(i).toFixed(1)+','+(pad.t+pH-(spreads[i]/mxS)*pH).toFixed(1)).join(' ');
+  const dates = snaps.map((s,i) => {
+    if (snaps.length > 8 && i % 2 !== 0 && i !== snaps.length-1) return '';
+    return '<text x="'+x(i).toFixed(1)+'" y="'+(height-5)+'" text-anchor="middle" font-size="8" fill="#94a3b8">'+s.date.replace(/202[56]-/,'')+'</text>';
+  }).join('');
+  return '<svg width="100%" viewBox="0 0 '+width+' '+height+'" style="display:block">'+bars+'<polyline points="'+spts+'" fill="none" stroke="#dc2626" stroke-width="2" stroke-linejoin="round"/>'+dates+'<text x="'+(width-pad.r)+'" y="'+(pad.t-2)+'" text-anchor="end" font-size="9" fill="#06b6d4">Listings</text><text x="'+(width-pad.r-50)+'" y="'+(pad.t-2)+'" text-anchor="end" font-size="9" fill="#dc2626">Spread%</text></svg>';
+}
+
 // ── Generic sortable table ────────────────────────────────────────────────────
 // state: { key, asc }
 const sortStates = {};
@@ -275,7 +431,8 @@ function doSort(tableId, key) {
     'movers-table': renderMoversTable,
     'port-inv-table': renderPortSummary,
     'port-sales-table': renderPortSales,
-    'deepdive-table': renderDeepDive
+    'deepdive-table': renderDeepDive,
+    'panic-table': renderPanicRoom
   };
   if (renders[tableId]) renders[tableId]();
 }
@@ -304,31 +461,27 @@ function renderAllEvents() {
   const cols = [
     {label:'#', key:'match'},
     {label:'Event', key:'name'},
+    {label:'Trend', key:null, center:true},
     {label:'Venue', key:'venue'},
     {label:'Date', key:'date'},
     {label:'Floor', key:'pMin', right:true},
-    {label:'P25', key:'p25', right:true},
     {label:'P50', key:'p50', right:true},
     {label:'SH Qty', key:'qty', right:true},
     {label:'V7D', key:'v7d', right:true},
     {label:'T7', key:'t7', right:true},
-    {label:'Trend', key:'trendPct', center:true},
+    {label:'Mom%', key:'trendPct', center:true},
     {label:'Sent.', key:'sent', center:true},
     {label:'Links', key:null, center:true}
   ];
   const rows = EVENTS.map(e => {
     const l = getLatest(e.match);
-    const snaps = PRICES[String(e.match)] || [];
-    let trendPct = null;
-    if (snaps.length >= 2) {
-      const c = snaps[snaps.length-1].p50, p = snaps[snaps.length-2].p50;
-      if (c && p) trendPct = (c - p) / p * 100;
-    }
+    const trendPct = pctChange(e.match, REF_DATE);
     return {
       match: e.match, name: e.name, venue: e.venue, date: e.date,
-      pMin: l ? l.pMin : null, p25: l ? l.p25 : null, p50: l ? l.p50 : null,
+      pMin: l ? l.pMin : null, p50: l ? l.p50 : null,
       qty: l ? l.qty : null, v7d: l ? l.v7d : null, t7: l ? l.t7 : null,
-      trendPct, sent: getSent(e.name), pos: e.pos, gotix: e.gotix
+      trendPct, sent: getSent(e.name), pos: e.pos, gotix: e.gotix,
+      _spark: p50Sparkline(e.match)
     };
   }).filter(r => !search || r.name.toLowerCase().includes(search) || r.venue.toLowerCase().includes(search));
 
@@ -341,10 +494,10 @@ function renderAllEvents() {
     <tr>
       <td class="muted">${r.match}</td>
       <td class="bold" style="max-width:200px">${r.name}</td>
+      <td class="c">${r._spark}</td>
       <td style="color:#475569;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.venue}</td>
       <td style="color:#475569">${r.date}</td>
       <td class="r">${fmt$(r.pMin)}</td>
-      <td class="r">${fmt$(r.p25)}</td>
       <td class="r bold">${fmt$(r.p50)}</td>
       <td class="r">${r.qty != null ? r.qty.toLocaleString() : '—'}</td>
       <td class="r">${r.v7d != null ? r.v7d.toLocaleString() : '—'}</td>
@@ -441,12 +594,17 @@ function computeMovers() {
     const ref = snaps.find(s => s.date === REF_DATE) || snaps[snaps.length - 2];
     if (!ref || !ref.p50 || !latest.p50) return null;
     const pct = (latest.p50 - ref.p50) / ref.p50 * 100;
+    const sprd = latest.pMin ? (latest.p50 - latest.pMin) / latest.pMin * 100 : 0;
     return {
       match: e.match, name: e.name, venue: e.venue,
       refP50: ref.p50, latestP50: latest.p50,
       absChange: latest.p50 - ref.p50, pctChange: pct,
       v7d: latest.v7d, qty: latest.qty,
-      sent: getSent(e.name), pos: e.pos, gotix: e.gotix
+      mom3: momentum3(e.match), listVel: listingVelocity(e.match),
+      sprdTrend: spreadTrend(e.match), demand: demandScore(e.match),
+      absorb: absorptionRate(e.match), spreadPct: sprd,
+      sent: getSent(e.name), pos: e.pos, gotix: e.gotix,
+      _spark: p50Sparkline(e.match)
     };
   }).filter(Boolean);
 }
@@ -470,54 +628,66 @@ function renderTrendsOverview() {
   const topGainers = [...movers].sort((a,b) => b.pctChange - a.pctChange).slice(0, 8);
   const topDecliners = [...movers].sort((a,b) => a.pctChange - b.pctChange).slice(0, 8);
 
+  const avgDemand = movers.reduce((s,m) => s + (m.demand||0), 0) / movers.length;
+  const avgLV = movers.reduce((s,m) => s + (m.listVel||0), 0) / movers.filter(m=>m.listVel!=null).length;
+  const avgAbs = movers.filter(m=>m.absorb!=null);
+  const avgAbsorb = avgAbs.length ? avgAbs.reduce((s,m) => s + m.absorb, 0) / avgAbs.length : null;
+
   const statsHTML = `
     <div class="stat-grid">
       <div class="stat ${avgChg < 0 ? 'red' : 'green'}">
         <div class="stat-lbl">Avg Market P50</div>
         <div class="stat-val">${fmt$(avgLat)}</div>
-        <div class="stat-sub" style="color:${avgChg<0?'#dc2626':'#16a34a'};font-weight:600">${avgChg<0?'↓ ':'↑ +'}${fmt$(Math.abs(avgChg))} (${fmtPct(avgPct, true)}) vs Mar 17</div>
+        <div class="stat-sub" style="color:${avgChg<0?'#dc2626':'#16a34a'};font-weight:600">${avgChg<0?'&#8595; ':'&#8593; +'}${fmt$(Math.abs(avgChg))} (${fmtPct(avgPct, true)}) vs Mar 17</div>
       </div>
       <div class="stat green"><div class="stat-lbl">Gainers</div><div class="stat-val" style="color:#16a34a">${gainers}</div><div class="stat-sub">up &gt;1%</div></div>
       <div class="stat red"><div class="stat-lbl">Decliners</div><div class="stat-val" style="color:#dc2626">${decliners}</div><div class="stat-sub">down &gt;1%</div></div>
-      <div class="stat"><div class="stat-lbl">Flat</div><div class="stat-val" style="color:#94a3b8">${flat}</div><div class="stat-sub">within ±1%</div></div>
+      <div class="stat"><div class="stat-lbl">Flat</div><div class="stat-val" style="color:#94a3b8">${flat}</div><div class="stat-sub">within &#177;1%</div></div>
+      <div class="stat blue"><div class="stat-lbl">Avg Demand</div><div class="stat-val">${avgDemand.toFixed(1)}</div><div class="stat-sub">views/listing composite</div></div>
+      <div class="stat ${avgLV > 0 ? 'red' : 'green'}"><div class="stat-lbl">Listing Velocity</div><div class="stat-val">${fmtPct(avgLV, true)}</div><div class="stat-sub">${avgLV > 0 ? 'supply growing' : 'supply tightening'}</div></div>
+      <div class="stat amber"><div class="stat-lbl">Absorption Rate</div><div class="stat-val">${avgAbsorb != null ? avgAbsorb.toFixed(1) + 'w' : '—'}</div><div class="stat-sub">weeks of supply</div></div>
     </div>`;
 
   const gainTable = topGainers.map(m => `
     <tr>
       <td class="muted">${m.match}</td>
-      <td class="bold" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</td>
+      <td class="bold" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</td>
+      <td class="c">${m._spark}</td>
       <td class="r">${fmt$(m.refP50)}</td>
       <td class="r bold">${fmt$(m.latestP50)}</td>
       <td class="r up">+${m.pctChange.toFixed(1)}%</td>
+      <td class="r">${m.v7d ? m.v7d.toLocaleString() : '—'}</td>
     </tr>`).join('');
 
   const declTable = topDecliners.map(m => `
     <tr>
       <td class="muted">${m.match}</td>
-      <td class="bold" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</td>
+      <td class="bold" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</td>
+      <td class="c">${m._spark}</td>
       <td class="r">${fmt$(m.refP50)}</td>
       <td class="r bold">${fmt$(m.latestP50)}</td>
       <td class="r down">${m.pctChange.toFixed(1)}%</td>
+      <td class="r">${m.v7d ? m.v7d.toLocaleString() : '—'}</td>
     </tr>`).join('');
 
   document.getElementById('trends-overview').innerHTML = statsHTML + `
     <div class="two-col">
       <div class="card card-pad">
-        <div class="section-title" style="color:#16a34a">🚀 Top Gainers (Mar 17 → Mar 26)</div>
+        <div class="section-title" style="color:#16a34a">&#128640; Top Gainers (Mar 17 &#8594; Mar 26)</div>
         <div class="overflow"><table>
-          <thead><tr><th>#</th><th>Event</th><th class="r">Ref P50</th><th class="r">Now</th><th class="r">Change</th></tr></thead>
+          <thead><tr><th>#</th><th>Event</th><th class="c">Trend</th><th class="r">Ref P50</th><th class="r">Now</th><th class="r">Change</th><th class="r">V7D</th></tr></thead>
           <tbody>${gainTable}</tbody>
         </table></div>
       </div>
       <div class="card card-pad">
-        <div class="section-title" style="color:#dc2626">📉 Top Decliners (Mar 17 → Mar 26)</div>
+        <div class="section-title" style="color:#dc2626">&#128200; Top Decliners (Mar 17 &#8594; Mar 26)</div>
         <div class="overflow"><table>
-          <thead><tr><th>#</th><th>Event</th><th class="r">Ref P50</th><th class="r">Now</th><th class="r">Change</th></tr></thead>
+          <thead><tr><th>#</th><th>Event</th><th class="c">Trend</th><th class="r">Ref P50</th><th class="r">Now</th><th class="r">Change</th><th class="r">V7D</th></tr></thead>
           <tbody>${declTable}</tbody>
         </table></div>
       </div>
     </div>
-    <div class="insight"><strong>Key Insight:</strong> ${gainers > decliners ? 'The market is strengthening' : 'The market is softening'} — ${decliners} of ${movers.length} matches declined since Mar 17, with average P50 ${avgPct > 0 ? 'up' : 'down'} ${fmtPct(Math.abs(avgPct))} market-wide. Data updated 3/26 with qualifier semis today.</div>`;
+    <div class="insight"><strong>Key Insight:</strong> ${gainers > decliners ? 'The market is strengthening' : 'The market is softening'} — ${decliners} of ${movers.length} matches declined since Mar 17, with average P50 ${avgPct > 0 ? 'up' : 'down'} ${fmtPct(Math.abs(avgPct))} market-wide. Avg absorption rate: ${avgAbsorb != null ? avgAbsorb.toFixed(1) : '—'} weeks of supply. Listing velocity ${avgLV > 0 ? 'positive (supply expanding)' : 'negative (supply tightening)'}.</div>`;
 }
 
 function renderMoversTable() {
@@ -525,13 +695,17 @@ function renderMoversTable() {
   const cols = [
     {label:'#', key:'match'},
     {label:'Event', key:'name'},
-    {label:'Venue', key:'venue'},
-    {label:'P50 Feb-19', key:'refP50', right:true},
-    {label:'P50 Mar-10', key:'latestP50', right:true},
-    {label:'$ Chg', key:'absChange', right:true},
+    {label:'Trend', key:null, center:true},
+    {label:'P50 Mar-17', key:'refP50', right:true},
+    {label:'P50 Now', key:'latestP50', right:true},
     {label:'% Chg', key:'pctChange', right:true},
+    {label:'Mom3', key:'mom3', right:true},
+    {label:'ListVel', key:'listVel', right:true},
+    {label:'Sprd%', key:'spreadPct', right:true},
+    {label:'SprdTrnd', key:'sprdTrend', center:true},
+    {label:'Demand', key:'demand', right:true},
+    {label:'Absorb', key:'absorb', right:true},
     {label:'V7D', key:'v7d', right:true},
-    {label:'Sent.', key:'sent', center:true},
     {label:'Links', key:null, center:true}
   ];
   if (!sortStates['movers-table']) sortStates['movers-table'] = {key:'pctChange', asc:false};
@@ -543,14 +717,18 @@ function renderMoversTable() {
         <tbody>${sorted.map(m => `
           <tr>
             <td class="muted">${m.match}</td>
-            <td class="bold" style="max-width:200px">${m.name}</td>
-            <td style="color:#475569">${m.venue}</td>
+            <td class="bold" style="max-width:180px">${m.name}</td>
+            <td class="c">${m._spark}</td>
             <td class="r">${fmt$(m.refP50)}</td>
             <td class="r bold">${fmt$(m.latestP50)}</td>
-            <td class="r ${m.absChange>=0?'up':'down'}">${m.absChange>=0?'+':''}${fmt$(m.absChange)}</td>
             <td class="r ${m.pctChange>=0?'up':'down'}">${fmtPct(m.pctChange, true)}</td>
+            <td class="r">${m.mom3!=null?fmtPct(m.mom3,true):'—'}</td>
+            <td class="r ${(m.listVel||0)>0?'down':(m.listVel||0)<0?'up':'flat'}">${m.listVel!=null?fmtPct(m.listVel,true):'—'}</td>
+            <td class="r">${m.spreadPct.toFixed(1)}%</td>
+            <td class="c">${trendArrow(m.sprdTrend != null ? -m.sprdTrend : null)}</td>
+            <td class="r">${m.demand!=null?m.demand.toFixed(1):'—'}</td>
+            <td class="r">${m.absorb!=null?m.absorb.toFixed(1)+'w':'—'}</td>
             <td class="r">${m.v7d ? m.v7d.toLocaleString() : '—'}</td>
-            <td class="c ${sentClass(m.sent)}">${m.sent}</td>
             <td class="c" style="white-space:nowrap">${badges(m.pos, m.gotix)}</td>
           </tr>`).join('')}
         </tbody>
@@ -571,34 +749,19 @@ function renderDeepDive() {
 
   const first = snaps[0], last = snaps[snaps.length - 1];
   const totalPct = first.p50 && last.p50 ? (last.p50 - first.p50) / first.p50 * 100 : null;
-
-  // Mini bar chart for P50
-  const p50vals = snaps.map(s => s.p50 || 0);
-  const maxP50 = Math.max(...p50vals, 1);
-  const p50bars = snaps.map((s, i) => {
-    const h = Math.round(p50vals[i] / maxP50 * 100);
-    const lbl = s.date.replace('2026-','').replace('2025-','');
-    return `<div class="bar-col" title="${s.date}: ${fmt$(s.p50)}"><div class="bar-fill" style="height:${h}%;background:#3b82f6"></div><div class="bar-date">${lbl}</div></div>`;
-  }).join('');
-
-  // V7D bars
-  const v7dvals = snaps.map(s => s.v7d || 0);
-  const maxV7D = Math.max(...v7dvals, 1);
-  const v7dbars = snaps.map((s, i) => {
-    const h = Math.round(v7dvals[i] / maxV7D * 100);
-    const lbl = s.date.replace('2026-','').replace('2025-','');
-    return `<div class="bar-col" title="${s.date}: ${(s.v7d||0).toLocaleString()}"><div class="bar-fill" style="height:${h}%;background:#8b5cf6"></div><div class="bar-date">${lbl}</div></div>`;
-  }).join('');
+  const m3 = momentum3(matchNum), lv = listingVelocity(matchNum);
+  const ds = demandScore(matchNum), ar = absorptionRate(matchNum);
 
   const cols = [
     {label:'Date', key:'date'},
     {label:'Floor', key:'pMin', right:true},
     {label:'P25', key:'p25', right:true},
     {label:'P50', key:'p50', right:true},
+    {label:'Listings', key:'listQty', right:true},
     {label:'SH Qty', key:'qty', right:true},
     {label:'V7D', key:'v7d', right:true},
     {label:'T7', key:'t7', right:true},
-    {label:'P50 Δ', key:'deltaPct', right:true}
+    {label:'P50 &#916;', key:'deltaPct', right:true}
   ];
   const snapRows = snaps.map((s, i) => {
     const prev = i > 0 ? snaps[i-1] : null;
@@ -612,13 +775,16 @@ function renderDeepDive() {
     <div class="stat-grid" style="margin-bottom:14px">
       <div class="stat"><div class="stat-lbl">Latest P50</div><div class="stat-val">${fmt$(last.p50)}</div><div class="stat-sub">${last.date}</div></div>
       <div class="stat"><div class="stat-lbl">Floor</div><div class="stat-val">${fmt$(last.pMin)}</div></div>
-      <div class="stat"><div class="stat-lbl">SH Qty</div><div class="stat-val">${last.qty ? last.qty.toLocaleString() : '—'}</div></div>
       <div class="stat"><div class="stat-lbl">V7D</div><div class="stat-val">${last.v7d ? last.v7d.toLocaleString() : '—'}</div></div>
-      ${totalPct !== null ? `<div class="stat ${totalPct<0?'red':'green'}"><div class="stat-lbl">All-Time P50 Chg</div><div class="stat-val" style="color:${totalPct<0?'#dc2626':'#16a34a'}">${fmtPct(totalPct, true)}</div><div class="stat-sub">${first.date.replace('2026-','').replace('2025-','')} → ${last.date.replace('2026-','')}</div></div>` : ''}
+      ${totalPct !== null ? '<div class="stat ' + (totalPct<0?'red':'green') + '"><div class="stat-lbl">All-Time P50 Chg</div><div class="stat-val" style="color:' + (totalPct<0?'#dc2626':'#16a34a') + '">' + fmtPct(totalPct, true) + '</div></div>' : ''}
+      <div class="stat blue"><div class="stat-lbl">Demand Score</div><div class="stat-val">${ds!=null?ds.toFixed(1):'—'}</div></div>
+      <div class="stat ${(lv||0)>0?'red':'green'}"><div class="stat-lbl">Listing Vel.</div><div class="stat-val">${lv!=null?fmtPct(lv,true):'—'}</div></div>
+      <div class="stat amber"><div class="stat-lbl">Absorption</div><div class="stat-val">${ar!=null?ar.toFixed(1)+'w':'—'}</div></div>
     </div>
-    <div class="two-col" style="margin-bottom:14px">
-      <div class="card card-pad"><div class="section-title">P50 Over Time</div><div class="bar-chart">${p50bars}</div></div>
-      <div class="card card-pad"><div class="section-title">Views (7D) Over Time</div><div class="bar-chart">${v7dbars}</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="card card-pad"><div class="section-title">P50 + Floor</div>${renderPriceChart(snaps, 400, 180)}</div>
+      <div class="card card-pad"><div class="section-title">Demand (V7D + Txns)</div>${renderDemandChart(snaps, 400, 180)}</div>
+      <div class="card card-pad"><div class="section-title">Supply (Listings + Spread%)</div>${renderSupplyChart(snaps, 400, 180)}</div>
     </div>
     <div class="card overflow">
       <table>
@@ -629,6 +795,7 @@ function renderDeepDive() {
             <td class="r">${fmt$(s.pMin)}</td>
             <td class="r">${fmt$(s.p25)}</td>
             <td class="r bold">${fmt$(s.p50)}</td>
+            <td class="r">${s.listQty ? s.listQty.toLocaleString() : '—'}</td>
             <td class="r">${s.qty ? s.qty.toLocaleString() : '—'}</td>
             <td class="r">${s.v7d ? s.v7d.toLocaleString() : '—'}</td>
             <td class="r">${s.t7 || '—'}</td>
@@ -745,40 +912,58 @@ function renderHotPicks() {
     const l = getLatest(e.match);
     if (!l) return null;
     const sent = getSent(e.name);
-    const momentum = pctChange(e.match, REF_DATE);
-    const spread = l.p50 - l.pMin;
-    const spreadPct = spread / Math.max(l.pMin, 1) * 100;
-    const score = ((sent/10) * (l.v7d / Math.max(avgV7D,1)) * (spreadPct/100 + 0.5));
-    return { match: e.match, name: e.name, venue: e.venue, sent, p50: l.p50, pMin: l.pMin, v7d: l.v7d, spreadPct, momentum, score, pos: e.pos, gotix: e.gotix };
+    const mom = pctChange(e.match, REF_DATE) || 0;
+    const spreadPct = l.pMin ? (l.p50 - l.pMin) / l.pMin * 100 : 0;
+    const sTrend = spreadTrend(e.match) || 0;
+    const ar = absorptionRate(e.match);
+    const ds = demandScore(e.match) || 0;
+
+    const demandIntensity = Math.min(l.v7d / Math.max(avgV7D, 1), 3);
+    const momScore = Math.max(0, Math.min(mom / 10 + 1, 2));
+    const sentScore = sent / 10;
+    const spreadScore = Math.min(spreadPct / 50, 1) * (sTrend < 0 ? 1.5 : sTrend > 5 ? 0.5 : 1);
+    const supplyScore = ar != null ? Math.max(0, 2 - ar / 5) : 0.5;
+    const score = (demandIntensity * 0.30 + momScore * 0.25 + sentScore * 0.15 + spreadScore * 0.15 + supplyScore * 0.15) * 10;
+
+    return { match: e.match, name: e.name, venue: e.venue, sent, p50: l.p50, pMin: l.pMin, v7d: l.v7d,
+      spreadPct, momentum: mom, sprdTrend: sTrend, demand: ds, absorb: ar,
+      score, pos: e.pos, gotix: e.gotix, _spark: p50Sparkline(e.match) };
   }).filter(Boolean);
 
   const cols = [
     {label:'#', key:'match'},
     {label:'Event', key:'name'},
-    {label:'Venue', key:'venue'},
+    {label:'Trend', key:null, center:true},
     {label:'Sent.', key:'sent', center:true},
     {label:'Floor', key:'pMin', right:true},
     {label:'P50', key:'p50', right:true},
-    {label:'Spread%', key:'spreadPct', right:true},
-    {label:'Momentum', key:'momentum', right:true},
+    {label:'Mom%', key:'momentum', right:true},
+    {label:'Sprd%', key:'spreadPct', right:true},
+    {label:'SprdTrnd', key:'sprdTrend', center:true},
     {label:'V7D', key:'v7d', right:true},
+    {label:'Demand', key:'demand', right:true},
+    {label:'Absorb', key:'absorb', right:true},
     {label:'Score', key:'score', right:true},
     {label:'Links', key:null, center:true}
   ];
   if (!sortStates['picks-table']) sortStates['picks-table'] = {key:'score', asc:false};
   const sorted = sortRows(picks, 'picks-table');
+  document.getElementById('picks-insight').innerHTML = '<strong>Score formula:</strong> Demand intensity (30%) + Price momentum (25%) + Sentiment (15%) + Spread opportunity (15%) + Supply tightness (15%). Higher = stronger demand + rising prices + tight supply.';
   document.getElementById('picks-head').innerHTML = '<tr>' + makeHead('picks-table', cols) + '</tr>';
-  document.getElementById('picks-body').innerHTML = sorted.map(p => `
-    <tr>
+  document.getElementById('picks-body').innerHTML = sorted.map((p, i) => `
+    <tr${i < 5 ? ' style="border-left:3px solid #1e40af"' : ''}>
       <td class="muted">${p.match}</td>
       <td class="bold" style="max-width:180px">${p.name}</td>
-      <td style="color:#475569">${p.venue}</td>
+      <td class="c">${p._spark}</td>
       <td class="c ${sentClass(p.sent)}">${p.sent}</td>
       <td class="r">${fmt$(p.pMin)}</td>
       <td class="r bold">${fmt$(p.p50)}</td>
+      <td class="r ${p.momentum>1?'up':p.momentum<-1?'down':'flat'}">${fmtPct(p.momentum,true)}</td>
       <td class="r">${p.spreadPct.toFixed(1)}%</td>
-      <td class="r ${p.momentum>1?'up':p.momentum<-1?'down':'flat'}">${p.momentum!=null?fmtPct(p.momentum,true):'—'}</td>
+      <td class="c">${trendArrow(p.sprdTrend != null ? -p.sprdTrend : null)}</td>
       <td class="r">${p.v7d ? p.v7d.toLocaleString() : '—'}</td>
+      <td class="r">${p.demand.toFixed(1)}</td>
+      <td class="r">${p.absorb!=null?p.absorb.toFixed(1)+'w':'—'}</td>
       <td class="r bold" style="color:#1e40af">${p.score.toFixed(2)}</td>
       <td class="c" style="white-space:nowrap">${badges(p.pos, p.gotix)}</td>
     </tr>`).join('');
@@ -797,11 +982,12 @@ function renderVenueScout() {
   const cols = [
     {label:'#', key:'match'},
     {label:'Event', key:'name'},
+    {label:'Trend', key:null, center:true},
     {label:'Venue', key:'venue'},
     {label:'Date', key:'date'},
     {label:'P50', key:'p50', right:true},
     {label:'V7D', key:'v7d', right:true},
-    {label:'Trend', key:'pctChg', right:true},
+    {label:'Mom%', key:'pctChg', right:true},
     {label:'Sent.', key:'sent', center:true},
     {label:'Links', key:null, center:true}
   ];
@@ -810,7 +996,8 @@ function renderVenueScout() {
     const l = getLatest(e.match);
     const chg = pctChange(e.match, REF_DATE);
     return { match: e.match, name: e.name, venue: e.venue, date: e.date, state,
-      p50: l ? l.p50 : null, v7d: l ? l.v7d : null, pctChg: chg, sent: getSent(e.name), pos: e.pos, gotix: e.gotix };
+      p50: l ? l.p50 : null, v7d: l ? l.v7d : null, pctChg: chg, sent: getSent(e.name), pos: e.pos, gotix: e.gotix,
+      _spark: p50Sparkline(e.match) };
   }).filter(r => sel === 'All' || r.state === sel);
 
   const withP = rows.filter(r => r.p50);
@@ -833,6 +1020,7 @@ function renderVenueScout() {
     <tr>
       <td class="muted">${r.match}</td>
       <td class="bold" style="max-width:200px">${r.name}</td>
+      <td class="c">${r._spark}</td>
       <td style="color:#475569">${r.venue}</td>
       <td style="color:#475569">${r.date}</td>
       <td class="r bold">${fmt$(r.p50)}</td>
@@ -850,12 +1038,12 @@ function renderPriceHunter() {
   const cols = [
     {label:'#', key:'match'},
     {label:'Event', key:'name'},
-    {label:'Venue', key:'venue'},
+    {label:'Trend', key:null, center:true},
     {label:'Date', key:'date'},
     {label:'Floor', key:'pMin', right:true},
     {label:'P50', key:'p50', right:true},
     {label:'Spread%', key:'spreadPct', right:true},
-    {label:'Momentum', key:'momentum', right:true},
+    {label:'Mom%', key:'momentum', right:true},
     {label:'V7D', key:'v7d', right:true},
     {label:'Sent.', key:'sent', center:true},
     {label:'Links', key:null, center:true}
@@ -866,7 +1054,8 @@ function renderPriceHunter() {
     const spreadPct = (l.p50 - l.pMin) / Math.max(l.pMin,1) * 100;
     const momentum = pctChange(e.match, REF_DATE);
     return { match: e.match, name: e.name, venue: e.venue, date: e.date,
-      p50: l.p50, pMin: l.pMin, v7d: l.v7d, spreadPct, momentum, sent: getSent(e.name), pos: e.pos, gotix: e.gotix };
+      p50: l.p50, pMin: l.pMin, v7d: l.v7d, spreadPct, momentum, sent: getSent(e.name), pos: e.pos, gotix: e.gotix,
+      _spark: p50Sparkline(e.match) };
   }).filter(Boolean);
 
   if (!sortStates['hunter-table']) sortStates['hunter-table'] = {key:'spreadPct', asc:false};
@@ -877,7 +1066,7 @@ function renderPriceHunter() {
     <tr>
       <td class="muted">${r.match}</td>
       <td class="bold" style="max-width:180px">${r.name}</td>
-      <td style="color:#475569">${r.venue}</td>
+      <td class="c">${r._spark}</td>
       <td style="color:#475569">${r.date}</td>
       <td class="r">${fmt$(r.pMin)}</td>
       <td class="r bold">${fmt$(r.p50)}</td>
@@ -887,6 +1076,101 @@ function renderPriceHunter() {
       <td class="c ${sentClass(r.sent)}">${r.sent}</td>
       <td class="c" style="white-space:nowrap">${badges(r.pos, r.gotix)}</td>
     </tr>`).join('');
+}
+
+// ── TAB 7: Panic Room ──────────────────────────────────────────────────────────
+function computePanicScore(inv) {
+  if (inv.unsoldQty <= 0) return null;
+  // Match by "(Match N)" in inventory name, or fallback to name match
+  const mm = inv.name.match(/\(Match (\d+)\)/);
+  const ev = mm ? EVENTS.find(e => e.match === parseInt(mm[1])) : EVENTS.find(e => e.name === inv.name);
+  if (!ev) return null;
+  const l = getLatest(ev.match);
+  if (!l) return null;
+  const totalUnsoldCost = INVENTORY.reduce((s, i) => s + (i.unsoldCost || 0), 0);
+  const capitalRisk = totalUnsoldCost > 0 ? (inv.unsoldCost || 0) / totalUnsoldCost : 0;
+  const mom = pctChange(ev.match, REF_DATE) || 0;
+  const declineSev = Math.max(0, -mom / 20);
+  const avgV7D = EVENTS.reduce((s,e) => { const x=getLatest(e.match); return s+(x?x.v7d:0); }, 0) / EVENTS.length;
+  const demandWeak = 1 - Math.min((l.v7d || 0) / Math.max(avgV7D * 2, 1), 1);
+  const spreadPct = l.pMin ? (l.p50 - l.pMin) / l.pMin * 100 : 0;
+  const spreadStress = Math.min(spreadPct / 100, 1);
+  const lv = listingVelocity(ev.match) || 0;
+  const supplyFlood = Math.max(0, Math.min(lv / 20, 1));
+  return {
+    score: capitalRisk * 30 + declineSev * 25 + demandWeak * 20 + spreadStress * 15 + supplyFlood * 10,
+    match: ev.match, name: ev.name, venue: ev.venue,
+    unsoldQty: inv.unsoldQty, unsoldCost: inv.unsoldCost || 0,
+    pMin: l.pMin, p50: l.p50, mom, v7d: l.v7d, spreadPct,
+    listVel: listingVelocity(ev.match), demand: demandScore(ev.match),
+    pos: ev.pos, gotix: ev.gotix,
+    _spark: p50Sparkline(ev.match)
+  };
+}
+
+function renderPanicRoom() {
+  const items = INVENTORY.map(inv => computePanicScore(inv)).filter(Boolean);
+  items.sort((a, b) => b.score - a.score);
+  const totalRisk = items.reduce((s, i) => s + i.unsoldCost, 0);
+  const avgScore = items.length ? items.reduce((s, i) => s + i.score, 0) / items.length : 0;
+  const critical = items.filter(i => i.score > 60).length;
+  const worst = items.length ? items[0] : null;
+
+  const cols = [
+    {label:'Severity', key:'score', center:true},
+    {label:'Event', key:'name'},
+    {label:'Trend', key:null, center:true},
+    {label:'Unsold', key:'unsoldQty', right:true},
+    {label:'At Risk', key:'unsoldCost', right:true},
+    {label:'Floor', key:'pMin', right:true},
+    {label:'P50', key:'p50', right:true},
+    {label:'Mom%', key:'mom', right:true},
+    {label:'V7D', key:'v7d', right:true},
+    {label:'Sprd%', key:'spreadPct', right:true},
+    {label:'ListVel', key:'listVel', right:true},
+    {label:'Score', key:'score', right:true},
+    {label:'Links', key:null, center:true}
+  ];
+  if (!sortStates['panic-table']) sortStates['panic-table'] = {key:'score', asc:false};
+  const sorted = sortRows(items, 'panic-table');
+
+  document.getElementById('panic-stats').innerHTML = `
+    <div class="panic-stat"><div class="stat-lbl" style="color:#f87171">Capital at Risk</div><div class="stat-val" style="color:#fef2f2">${fmt$(totalRisk)}</div></div>
+    <div class="panic-stat"><div class="stat-lbl" style="color:#f87171">Avg Panic Score</div><div class="stat-val" style="color:#fef2f2">${avgScore.toFixed(1)}</div></div>
+    <div class="panic-stat"><div class="stat-lbl" style="color:#f87171">Critical Events</div><div class="stat-val" style="color:${critical>0?'#fca5a5':'#86efac'}">${critical}</div></div>
+    <div class="panic-stat"><div class="stat-lbl" style="color:#f87171">Worst</div><div class="stat-val" style="color:#fef2f2;font-size:.9rem">${worst ? worst.name.substring(0,30) : '—'}</div></div>`;
+
+  const maxScore = Math.max(...items.map(i => i.score), 1);
+  document.getElementById('panic-content').innerHTML = `
+    <div class="panic-card overflow mt">
+      <table>
+        <thead><tr>${makeHead('panic-table', cols)}</tr></thead>
+        <tbody>${sorted.map(r => {
+          const sev = r.score > 60 ? 'panic-critical' : r.score > 30 ? 'panic-warning' : 'panic-watch';
+          const sevLabel = r.score > 60 ? 'CRITICAL' : r.score > 30 ? 'WARNING' : 'WATCH';
+          const pct = Math.min(r.score / maxScore * 100, 100);
+          const barColor = r.score > 60 ? '#dc2626' : r.score > 30 ? '#d97706' : '#6b7280';
+          return `<tr>
+            <td class="c"><span class="panic-badge ${sev}">${sevLabel}</span></td>
+            <td style="color:#fecaca;font-weight:700;max-width:180px">${r.name}</td>
+            <td class="c">${r._spark}</td>
+            <td class="r" style="color:#fecaca">${r.unsoldQty}</td>
+            <td class="r" style="color:#fca5a5;font-weight:700">${fmt$(r.unsoldCost)}</td>
+            <td class="r" style="color:#fecaca">${fmt$(r.pMin)}</td>
+            <td class="r" style="color:#fecaca;font-weight:700">${fmt$(r.p50)}</td>
+            <td class="r" style="color:${r.mom<-1?'#fca5a5':r.mom>1?'#86efac':'#94a3b8'}">${fmtPct(r.mom,true)}</td>
+            <td class="r" style="color:#fecaca">${r.v7d ? r.v7d.toLocaleString() : '—'}</td>
+            <td class="r" style="color:#fecaca">${r.spreadPct.toFixed(1)}%</td>
+            <td class="r" style="color:${(r.listVel||0)>0?'#fca5a5':'#86efac'}">${r.listVel!=null?fmtPct(r.listVel,true):'—'}</td>
+            <td class="r"><div class="score-bar"><div class="score-fill" style="width:${pct}%;background:${barColor}"></div><div class="score-text">${r.score.toFixed(1)}</div></div></td>
+            <td class="c" style="white-space:nowrap">${badges(r.pos, r.gotix)}</td>
+          </tr>`; }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="background:linear-gradient(135deg,#2d0a0a,#450a0a);border:1px solid #991b1b;border-radius:8px;padding:14px 18px;margin-top:14px;color:#fca5a5;font-size:.78rem">
+      <strong style="color:#fef2f2">Action Required:</strong> ${critical} event${critical!==1?'s':''} in CRITICAL status with ${fmt$(totalRisk)} total capital at risk. ${worst && worst.mom < -5 ? 'Worst performer declining ' + fmtPct(Math.abs(worst.mom)) + ' — consider immediate price reduction or cross-listing.' : 'Monitor closely and consider repricing events with widening spreads.'}
+    </div>`;
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
@@ -900,6 +1184,7 @@ document.addEventListener('DOMContentLoaded', function() {
   renderHotPicks();
   initVenueSelect();
   renderPriceHunter();
+  renderPanicRoom();
 });
 </script>
 </body>
